@@ -28,6 +28,9 @@ dependencies:
   # Excel export
   excel: ^4.0.2
   file_saver: ^0.3.0 # For saving the file on desktop
+  google_fonts: ^6.3.2
+  lucide_icons: ^0.257.0
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:

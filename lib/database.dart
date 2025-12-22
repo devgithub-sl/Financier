@@ -165,6 +165,10 @@ class CategoryDao extends DatabaseAccessor<AppDatabase>
     return (select(categories)..where((c) => c.name.equals('💰 Income'))).getSingle();
   }
 
+  Future<Category?> getCategoryByName(String name) {
+    return (select(categories)..where((c) => c.name.equals(name))).getSingleOrNull();
+  }
+
   Stream<List<Category>> watchMainCategories() {
     return (select(categories)
       ..where((c) => c.parentId.isNull())
@@ -293,6 +297,33 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
   Future<bool> updateTransaction(TransactionsCompanion entry) {
     return update(transactions)
         .replace(entry.copyWith(modifiedAt: Value(DateTime.now())));
+  }
+
+  // --- MODIFIED: Added watchAllTransactions ---
+  Stream<List<TransactionWithCategoryAndParent>> watchAllTransactions() {
+    final parentCategories = alias(categories, 'p');
+    return (select(transactions).join([
+      innerJoin(categories, categories.id.equalsExp(transactions.categoryId)),
+      leftOuterJoin(parentCategories,
+          parentCategories.id.equalsExp(categories.parentId)),
+    ])
+      ..orderBy([OrderingTerm.desc(transactions.dateOfFinance)]))
+        .watch()
+        .map(_mapRowsToTransactions);
+  }
+
+  // --- MODIFIED: Added getAllTransactions ---
+  Future<List<TransactionWithCategoryAndParent>> getAllTransactions() async {
+    final parentCategories = alias(categories, 'p');
+    final rows = await (select(transactions).join([
+      innerJoin(categories, categories.id.equalsExp(transactions.categoryId)),
+      leftOuterJoin(parentCategories,
+          parentCategories.id.equalsExp(categories.parentId)),
+    ])
+      ..orderBy([OrderingTerm.desc(transactions.dateOfFinance)]))
+        .get();
+    
+    return _mapRowsToTransactions(rows);
   }
 
   Future<void> deleteTransaction(int id) =>
