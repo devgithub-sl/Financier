@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -5,13 +6,16 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:excel/excel.dart' as exc hide Border;
 
-import 'package:file_saver/file_saver.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
 
 import '../database.dart';
 import '../theme/theme_provider.dart';
+import '../providers/currency_provider.dart';
 import '../widgets/transaction_dialog.dart';
 import '../widgets/manage_categories_dialog.dart';
+import '../widgets/settings_dialog.dart';
+import '../widgets/summary_dialog.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -59,7 +63,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final transactionDao = Provider.of<TransactionDao>(context);
     final categoryDao = Provider.of<CategoryDao>(context);
     final themeProvider = Provider.of<ThemeProvider>(context);
+    final currencyProvider = Provider.of<CurrencyProvider>(context);
     final theme = Theme.of(context);
+
+    // Formatters
+    final currencyFormat = NumberFormat.simpleCurrency(name: currencyProvider.currencyCode);
 
     return Scaffold(
       body: StreamBuilder<List<Category>>(
@@ -95,7 +103,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               for (var t in filteredTransactions) {
                 // Determine if income or expense based on root category
-                // Logic derived from original: if main category is 'Income', it's income.
                 bool isIncome = false;
                 if (_incomeCategoryId != null) {
                    if (t.parentCategory != null) {
@@ -118,6 +125,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     title: const Text('Financier'),
                     centerTitle: false,
                     actions: [
+                      IconButton(
+                        icon: const Icon(LucideIcons.barChart2),
+                        tooltip: 'Summary',
+                        onPressed: () => _showSummaryDialog(context, totalIncome, totalExpense, balance),
+                      ),
+                      IconButton(
+                         icon: const Icon(LucideIcons.settings),
+                         tooltip: 'Settings',
+                         onPressed: () => _showSettingsDialog(context),
+                      ),
                       IconButton(
                         icon: Icon(themeProvider.themeMode == ThemeMode.dark ? LucideIcons.sun : LucideIcons.moon),
                         onPressed: () => themeProvider.toggleTheme(),
@@ -206,7 +223,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         Text('Total Balance', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.8))),
                                         const SizedBox(height: 4),
                                         Text(
-                                          NumberFormat.currency(symbol: '\$').format(balance),
+                                          currencyFormat.format(balance),
                                           style: theme.textTheme.headlineLarge?.copyWith(
                                             color: theme.colorScheme.onPrimary,
                                             fontWeight: FontWeight.bold,
@@ -226,6 +243,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         amount: totalIncome,
                                         icon: LucideIcons.arrowUpCircle,
                                         color: Colors.greenAccent.shade100, // Light for contrast on dark primary
+                                        currencyFormat: currencyFormat,
                                       ),
                                     ),
                                     Container(
@@ -238,6 +256,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         amount: totalExpense,
                                         icon: LucideIcons.arrowDownCircle,
                                         color: Colors.redAccent.shade100,
+                                        currencyFormat: currencyFormat,
                                       ),
                                     ),
                                   ],
@@ -355,7 +374,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                         ),
                                       ),
                                       Text(
-                                        '${isIncome ? "+" : "-"}${NumberFormat.currency(symbol: '\$').format(t.transaction.amount)}',
+                                        '${isIncome ? "+" : "-"}${currencyFormat.format(t.transaction.amount)}',
                                         style: theme.textTheme.titleMedium?.copyWith(
                                           color: isIncome ? Colors.green : theme.colorScheme.error,
                                           fontWeight: FontWeight.bold,
@@ -398,7 +417,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       initialDate: _selectedMonth,
       firstDate: firstDate,
       lastDate: lastDate,
-      initialDatePickerMode: DatePickerMode.year, // Optional optimization
+      initialDatePickerMode: DatePickerMode.year,
       helpText: 'Select Month (Day ignored)',
     );
 
@@ -421,6 +440,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showDialog(
       context: context,
       builder: (context) => const ManageCategoriesDialog(),
+    );
+  }
+
+  void _showSettingsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => const SettingsDialog(),
+    );
+  }
+
+  void _showSummaryDialog(BuildContext context, double income, double expense, double balance) {
+    showDialog(
+      context: context,
+      builder: (context) => SummaryDialog(income: income, expense: expense, balance: balance),
     );
   }
 
@@ -453,7 +486,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _exportToExcel(BuildContext context, TransactionDao dao,
       CategoryDao categoryDao) async {
-      // (Simplified export logic from original main.dart, adapted)
       try {
         final transactions = await dao.getAllTransactions();
         final excel = exc.Excel.createExcel();
@@ -492,20 +524,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (fileBytes != null) {
           final fileName = 'financier_export_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx';
           
-          await FileSaver.instance.saveFile(
-            name: fileName,
-            bytes: Uint8List.fromList(fileBytes),
-            fileExtension: 'xlsx',
-            mimeType: MimeType.microsoftExcel
+          // Request path from user
+          String? outputFile = await FilePicker.platform.saveFile(
+            dialogTitle: 'Save Excel File',
+            fileName: fileName,
+            type: FileType.custom,
+            allowedExtensions: ['xlsx'],
           );
-          
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Exported to $fileName'), backgroundColor: Colors.green),
-          );
+
+          if (outputFile != null) {
+             final file = File(outputFile);
+             await file.writeAsBytes(fileBytes);
+
+             if (!context.mounted) return;
+             ScaffoldMessenger.of(context).showSnackBar(
+               SnackBar(content: Text('Exported to $outputFile'), backgroundColor: Colors.green),
+             );
+          } else {
+            // User canceled
+          }
         }
       } catch (e) {
-        if (!mounted) return;
+        if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
         );
@@ -518,12 +558,14 @@ class _SummaryItem extends StatelessWidget {
   final double amount;
   final IconData icon;
   final Color color;
+  final NumberFormat currencyFormat;
 
   const _SummaryItem({
     required this.label,
     required this.amount,
     required this.icon,
     required this.color,
+    required this.currencyFormat,
   });
 
   @override
@@ -536,12 +578,12 @@ class _SummaryItem extends StatelessWidget {
            children: [
              Icon(icon, color: color, size: 16),
              const SizedBox(width: 4),
-             Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withOpacity(0.8))),
+             Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.8))),
            ],
         ),
         const SizedBox(height: 4),
         Text(
-          NumberFormat.compactSimpleCurrency().format(amount),
+          currencyFormat.format(amount), // Use the passed format
           style: theme.textTheme.titleLarge?.copyWith(
             color: theme.colorScheme.onPrimary,
             fontWeight: FontWeight.w600,

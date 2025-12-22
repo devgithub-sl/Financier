@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:provider/provider.dart';
 import 'database.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_provider.dart';
 import 'screens/dashboard_screen.dart';
+import 'providers/currency_provider.dart';
 
 late AppDatabase database;
 
@@ -28,6 +28,9 @@ class MyApp extends StatelessWidget {
         
         // Theme Provider
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+
+        // Currency Provider
+        ChangeNotifierProvider(create: (_) => CurrencyProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
