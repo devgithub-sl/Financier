@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:excel/excel.dart' as exc hide Border;
+import 'package:excel/excel.dart' as excel_file;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
@@ -321,7 +321,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             confirmDismiss: (direction) async {
                               return await _showDeleteConfirmationDialog(context, t.transaction, transactionDao);
                             },
-                            child: Card(
+                            child: RepaintBoundary(
+                              child: Card(
                               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                               elevation: 0,
                               shape: RoundedRectangleBorder(
@@ -384,6 +385,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ),
                                 ),
                               ),
+                            ),
                             ),
                           );
                         },
@@ -488,30 +490,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
       CategoryDao categoryDao) async {
       try {
         final transactions = await dao.getAllTransactions();
-        final excel = exc.Excel.createExcel();
+        final excel = excel_file.Excel.createExcel();
         final sheetName = 'Transactions';
-        final exc.Sheet sheet = excel[sheetName];
+        final excel_file.Sheet sheet = excel[sheetName];
 
         // Headers
         sheet.appendRow([
-          exc.TextCellValue('ID'),
-          exc.TextCellValue('Description'),
-          exc.TextCellValue('Amount'),
-          exc.TextCellValue('Category'),
-          exc.TextCellValue('Parent Category'),
-          exc.TextCellValue('Date'),
-          exc.TextCellValue('Created At')
+          excel_file.TextCellValue('ID'),
+          excel_file.TextCellValue('Description'),
+          excel_file.TextCellValue('Amount'),
+          excel_file.TextCellValue('Category'),
+          excel_file.TextCellValue('Parent Category'),
+          excel_file.TextCellValue('Date'),
+          excel_file.TextCellValue('Created At')
         ]);
 
         for (final t in transactions) {
           sheet.appendRow([
-            exc.IntCellValue(t.transaction.id),
-            exc.TextCellValue(t.transaction.description),
-            exc.DoubleCellValue(t.transaction.amount),
-            exc.TextCellValue(t.category.name),
-            exc.TextCellValue(t.parentCategory?.name ?? ''),
-            exc.TextCellValue(DateFormat('yyyy-MM-dd').format(t.transaction.dateOfFinance)),
-            exc.TextCellValue(DateFormat('yyyy-MM-dd HH:mm').format(t.transaction.createdAt)),
+            excel_file.IntCellValue(t.transaction.id),
+            excel_file.TextCellValue(t.transaction.description),
+            excel_file.DoubleCellValue(t.transaction.amount),
+            excel_file.TextCellValue(t.category.name),
+            excel_file.TextCellValue(t.parentCategory?.name ?? ''),
+            excel_file.TextCellValue(DateFormat('yyyy-MM-dd').format(t.transaction.dateOfFinance)),
+            excel_file.TextCellValue(DateFormat('yyyy-MM-dd HH:mm').format(t.transaction.createdAt)),
           ]);
         }
         

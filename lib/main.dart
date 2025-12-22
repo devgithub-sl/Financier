@@ -5,11 +5,13 @@ import 'theme/app_theme.dart';
 import 'theme/theme_provider.dart';
 import 'screens/dashboard_screen.dart';
 import 'providers/currency_provider.dart';
+import 'services/settings_service.dart';
 
 late AppDatabase database;
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SettingsService().init();
   database = AppDatabase();
   runApp(const MyApp());
 }

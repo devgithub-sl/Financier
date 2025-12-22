@@ -334,15 +334,9 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
     final dbFolder = await getApplicationDocumentsDirectory();
-    // --- NEW FILE NAME ---
     final file = File(p.join(dbFolder.path, 'financier_v2.sqlite'));
 
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      open.open.overrideFor(open.OperatingSystem.windows,
-              () => DynamicLibrary.open('sqlite3.dll'));
-      open.open.overrideFor(open.OperatingSystem.macOS,
-              () => DynamicLibrary.open('/usr/lib/libsqlite3.dylib'));
-    }
-    return NativeDatabase(file);
+    // Using NativeDatabase.createInBackground to run the database in a separate isolate
+    return NativeDatabase.createInBackground(file);
   });
 }

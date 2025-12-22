@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
-class CurrencyProvider extends ChangeNotifier {
-  String _currencyCode = 'USD';
+import '../services/settings_service.dart';
 
-  String get currencyCode => _currencyCode;
+class CurrencyProvider extends ChangeNotifier {
+  String get currencyCode => SettingsService().currencyCode;
 
   void setCurrency(String code) {
-    if (_currencyCode != code) {
-      _currencyCode = code;
-      notifyListeners();
+    if (SettingsService().currencyCode != code) {
+      SettingsService().setCurrencyCode(code).then((_) {
+        notifyListeners();
+      });
     }
   }
 }
