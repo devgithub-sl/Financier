@@ -265,7 +265,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           // 2. Master View (List)
           Expanded(
-            flex: 4,
+            flex: 5,
             child: Column(
               children: [
                  // Top Bar in Master
@@ -273,11 +273,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                    padding: const EdgeInsets.all(16.0),
                    child: Column(
                      children: [
-                       Row(
+                       Wrap(
+                         spacing: 16,
+                         runSpacing: 16,
+                         crossAxisAlignment: WrapCrossAlignment.center,
                          children: [
-                           Expanded(child: _buildSearchBar()),
-                           const SizedBox(width: 16),
-                           _buildDateButton(context, theme),
+                           ConstrainedBox(
+                             constraints: const BoxConstraints(minWidth: 200, maxWidth: 400),
+                             child: _buildSearchBar(),
+                           ),
+                           InkWell(
+                             onTap: () => _showMonthYearPicker(context),
+                             borderRadius: BorderRadius.circular(12),
+                             child: _buildDateButton(context, theme),
+                           ),
                          ],
                        ),
                        const SizedBox(height: 16),
@@ -329,7 +338,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           // 3. Detail View (Form)
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Container(
               color: theme.colorScheme.surfaceContainerLow,
               padding: const EdgeInsets.all(24),
@@ -355,18 +364,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
                         child: _selectedTransaction != null
-                            ? TransactionForm(
-                                key: ValueKey(_selectedTransaction!.transaction.id),
-                                transactionToEdit: _selectedTransaction,
-                                onSaved: () {
-                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated!')));
-                                },
-                                onCancel: () {
-                                   setState(() {
-                                     _selectedTransaction = null; // Clear selection
-                                   });
-                                },
-                            )
+                            ? Center(
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 600),
+                                  child: TransactionForm(
+                                      key: ValueKey(_selectedTransaction!.transaction.id),
+                                      transactionToEdit: _selectedTransaction,
+                                      onSaved: () {
+                                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated!')));
+                                      },
+                                      onCancel: () {
+                                         setState(() {
+                                           _selectedTransaction = null; // Clear selection
+                                         });
+                                      },
+                                  ),
+                                ),
+                              )
                             : Center(
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
