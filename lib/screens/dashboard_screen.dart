@@ -36,6 +36,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
+  int? _selectedMainCategoryId;
+
   @override
   Widget build(BuildContext context) {
     final transactionDao = Provider.of<TransactionDao>(context);
@@ -47,13 +49,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     // Formatters
     final currencyFormat = NumberFormat.simpleCurrency(name: currencyProvider.currencyCode);
 
-    return Scaffold(
-      body: StreamBuilder<List<Category>>(
-        stream: categoryDao.watchMainCategories(),
-        builder: (context, catSnapshot) {
-          final mainCategories = catSnapshot.data ?? [];
+    return StreamBuilder<List<Category>>(
+      stream: categoryDao.watchMainCategories(),
+      builder: (context, catSnapshot) {
+        final mainCategories = catSnapshot.data ?? [];
 
-          return StreamBuilder<List<TransactionWithCategoryAndParent>>(
+        return Scaffold(
+          body: StreamBuilder<List<TransactionWithCategoryAndParent>>(
             stream: transactionDao.watchAllTransactions(),
             builder: (context, snapshot) {
                // Calculate Summary
@@ -65,6 +67,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 final matchDate = t.transaction.dateOfFinance.year == _selectedMonth.year &&
                     t.transaction.dateOfFinance.month == _selectedMonth.month;
                 if (!matchDate) return false;
+
+                // Category Filter
+                if (_selectedMainCategoryId != null) {
+                  final matchesCategory = t.category.id == _selectedMainCategoryId ||
+                      t.category.parentId == _selectedMainCategoryId;
+                  if (!matchesCategory) return false;
+                }
 
                 if (_searchQuery.isNotEmpty) {
                   final query = _searchQuery.toLowerCase();
@@ -189,7 +198,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                     Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text('Total Balance', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.8))),
+                                        Text('Page Net Total', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.8))),
                                         const SizedBox(height: 4),
                                         Text(
                                           currencyFormat.format(balance),
@@ -376,13 +385,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               );
             },
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showTransactionDialog(context),
-        icon: const Icon(LucideIcons.plus),
-        label: const Text('Add'),
+          ),
+          bottomNavigationBar: Container(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, -5),
+                )
+              ],
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                   _buildTabItem(context, 'All', LucideIcons.infinity, null, _selectedMainCategoryId == null),
+                   const SizedBox(width: 8),
+                   ...mainCategories.map((cat) {
+                      IconData icon;
+                      if (cat.name.contains('Income')) icon = LucideIcons.coins;
+                      else if (cat.name.contains('Essential')) icon = LucideIcons.shoppingCart;
+                      else if (cat.name.contains('Personal')) icon = LucideIcons.coffee;
+                      else if (cat.name.contains('Leisure')) icon = LucideIcons.gamepad2;
+                      else if (cat.name.contains('Finance')) icon = LucideIcons.briefcase;
+                      else if (cat.name.contains('Optional')) icon = LucideIcons.sparkles;
+                      else icon = LucideIcons.folder;
+                      
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8.0),
+                        child: _buildTabItem(context, cat.name, icon, cat.id, _selectedMainCategoryId == cat.id),
+                      );
+                   }),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTabItem(BuildContext context, String label, IconData icon, int? id, bool isSelected) {
+    final theme = Theme.of(context);
+    final color = isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
+    final bg = isSelected ? theme.colorScheme.primaryContainer : Colors.transparent;
+    
+    // Clean up label (remove emojis if present for cleaner look, optional)
+    // For now keeping simpler
+    String cleanLabel = label;
+    if (label.contains(' ')) {
+      // rough heuristic to keep it short if it has emojis
+      // split by space, if first part is emoji-like (check length?)
+      // actually lets just show it as is
+    }
+
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedMainCategoryId = id;
+        });
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(20),
+          border: isSelected ? null : Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(height: 4),
+            Text(
+              cleanLabel,
+              style: TextStyle(
+                color: color,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 10,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
