@@ -1,13 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // For shortcuts
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:drift/drift.dart' hide Column;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:excel/excel.dart' as excel_file;
-
-import 'package:file_picker/file_picker.dart';
-import 'package:flutter/services.dart';
+import 'package:file_selector/file_selector.dart'; // Desktop file picker
 
 import '../database.dart';
 import '../theme/theme_provider.dart';
@@ -16,6 +15,12 @@ import '../widgets/transaction_dialog.dart';
 import '../widgets/manage_categories_dialog.dart';
 import '../widgets/settings_dialog.dart';
 import '../widgets/summary_dialog.dart';
+
+// New Widgets
+import '../widgets/responsive_scaffold.dart';
+import '../widgets/transaction_list.dart';
+import '../widgets/transaction_form.dart';
+import '../widgets/summary_card.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,7 +33,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final TextEditingController _searchController = TextEditingController();
   DateTime _selectedMonth = DateTime.now();
   String _searchQuery = '';
+  int? _selectedMainCategoryId;
 
+  // Desktop State
+  TransactionWithCategoryAndParent? _selectedTransaction;
+  bool _showNewTransactionForm = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text;
+      });
+    });
+  }
 
   @override
   void dispose() {
@@ -36,396 +55,466 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.dispose();
   }
 
-  int? _selectedMainCategoryId;
+  // --- Shortcuts Intents ---
+  void _handleNewTransactionShortcut() {
+    setState(() {
+      _selectedTransaction = null;
+      _showNewTransactionForm = true;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final transactionDao = Provider.of<TransactionDao>(context);
     final categoryDao = Provider.of<CategoryDao>(context);
     final themeProvider = Provider.of<ThemeProvider>(context);
-    final currencyProvider = Provider.of<CurrencyProvider>(context);
+    
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true): _handleNewTransactionShortcut,
+      },
+      child: Focus(
+        autofocus: true,
+        child: StreamBuilder<List<Category>>(
+          stream: categoryDao.watchMainCategories(),
+          builder: (context, catSnapshot) {
+            final mainCategories = catSnapshot.data ?? [];
+
+            return StreamBuilder<List<TransactionWithCategoryAndParent>>(
+              stream: transactionDao.watchAllTransactions(),
+              builder: (context, snapshot) {
+                // ... Data Processing (Filter & Sort) ...
+                final transactions = snapshot.data ?? [];
+                double totalIncome = 0;
+                double totalExpense = 0;
+
+                final filteredTransactions = transactions.where((t) {
+                  final matchDate = t.transaction.dateOfFinance.year == _selectedMonth.year &&
+                      t.transaction.dateOfFinance.month == _selectedMonth.month;
+                  if (!matchDate) return false;
+
+                  if (_selectedMainCategoryId != null) {
+                    final matchesCategory = t.category.id == _selectedMainCategoryId ||
+                        t.category.parentId == _selectedMainCategoryId;
+                    if (!matchesCategory) return false;
+                  }
+
+                  if (_searchQuery.isNotEmpty) {
+                    final query = _searchQuery.toLowerCase();
+                    final desc = t.transaction.description.toLowerCase();
+                    final amount = t.transaction.amount.toString();
+                    final cat = t.category.name.toLowerCase();
+                    return desc.contains(query) || amount.contains(query) || cat.contains(query);
+                  }
+                  return true;
+                }).toList();
+
+                filteredTransactions.sort((a, b) => b.transaction.dateOfFinance.compareTo(a.transaction.dateOfFinance));
+
+                for (var t in filteredTransactions) {
+                  if (t.transaction.isIncome) {
+                    totalIncome += t.transaction.amount;
+                  } else {
+                    totalExpense += t.transaction.amount;
+                  }
+                }
+                double balance = totalIncome - totalExpense;
+
+                return ResponsiveScaffold(
+                  mobileLayout: _buildMobileLayout(
+                    context, 
+                    filteredTransactions, 
+                    totalIncome, 
+                    totalExpense, 
+                    balance, 
+                    mainCategories, 
+                    themeProvider,
+                    transactionDao,
+                    categoryDao
+                  ),
+                  desktopLayout: _buildDesktopLayout(
+                    context, 
+                    filteredTransactions, 
+                    totalIncome, 
+                    totalExpense, 
+                    balance, 
+                    mainCategories, 
+                    themeProvider,
+                    transactionDao,
+                    categoryDao
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // ... (Mobile Layout is mostly the same as before, but using extracted widgets) ...
+  Widget _buildMobileLayout(
+      BuildContext context,
+      List<TransactionWithCategoryAndParent> transactions,
+      double income,
+      double expense,
+      double balance,
+      List<Category> categories,
+      ThemeProvider themeProvider,
+      TransactionDao transactionDao,
+      CategoryDao categoryDao
+      ) {
+      // Reconstituting the previous mobile layout using new widgets
+      final theme = Theme.of(context);
+      return Scaffold(
+        body: CustomScrollView(
+          slivers: [
+             SliverAppBar.large(
+               title: const Text('Financier'),
+               actions: _buildAppBarActions(context, themeProvider, transactionDao, categoryDao, income, expense, balance),
+             ),
+             SliverToBoxAdapter(
+               child: Padding(
+                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                 child: Column(
+                   children: [
+                     _buildDateFilterRow(context, theme),
+                     const SizedBox(height: 16),
+                     SummaryCard(totalIncome: income, totalExpense: expense, balance: balance), // Reused
+                     const SizedBox(height: 16),
+                     _buildSearchBar(),
+                   ],
+                 ),
+               ),
+             ),
+             TransactionList( // Reused
+               transactions: transactions,
+               onTransactionTap: (t) => _showTransactionDialog(context, transactionToEdit: t),
+               onTransactionDelete: (t) => _deleteWithUndo(context, transactionDao, t),
+               onTransactionDuplicate: (t) {
+                   // Create a copy but with new ID (null) and current time? Or keep same date?
+                   // Let's open the dialog with the data pre-filled but as a NEW transaction.
+                   // We need to modify TransactionDialog/Form to accept a 'template' transaction.
+                   // Or we can just pass it as 'transactionToEdit' but handle the save logic differently?
+                   // Simpler: Just immediately insert a copy into DB and show snackbar.
+                   _duplicateTransaction(context, transactionDao, t);
+               },
+             ),
+             const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
+          ],
+        ),
+        bottomNavigationBar: _buildCategoryTabs(context, categories, theme),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => _showTransactionDialog(context),
+          heroTag: 'mobile_fab',
+          icon: const Icon(LucideIcons.plus),
+          label: const Text('Add'),
+        ),
+      );
+  }
+
+  // --- DESKTOP LAYOUT ---
+  Widget _buildDesktopLayout(
+      BuildContext context,
+      List<TransactionWithCategoryAndParent> transactions,
+      double income,
+      double expense,
+      double balance,
+      List<Category> categories,
+      ThemeProvider themeProvider,
+      TransactionDao transactionDao,
+      CategoryDao categoryDao
+  ) {
     final theme = Theme.of(context);
-
-    // Formatters
-    final currencyFormat = NumberFormat.simpleCurrency(name: currencyProvider.currencyCode);
-
-    return StreamBuilder<List<Category>>(
-      stream: categoryDao.watchMainCategories(),
-      builder: (context, catSnapshot) {
-        final mainCategories = catSnapshot.data ?? [];
-
-        return Scaffold(
-          body: StreamBuilder<List<TransactionWithCategoryAndParent>>(
-            stream: transactionDao.watchAllTransactions(),
-            builder: (context, snapshot) {
-               // Calculate Summary
-              double totalIncome = 0;
-              double totalExpense = 0;
-              final transactions = snapshot.data ?? [];
-
-              final filteredTransactions = transactions.where((t) {
-                final matchDate = t.transaction.dateOfFinance.year == _selectedMonth.year &&
-                    t.transaction.dateOfFinance.month == _selectedMonth.month;
-                if (!matchDate) return false;
-
-                // Category Filter
-                if (_selectedMainCategoryId != null) {
-                  final matchesCategory = t.category.id == _selectedMainCategoryId ||
-                      t.category.parentId == _selectedMainCategoryId;
-                  if (!matchesCategory) return false;
-                }
-
-                if (_searchQuery.isNotEmpty) {
-                  final query = _searchQuery.toLowerCase();
-                  final desc = t.transaction.description.toLowerCase();
-                  final amount = t.transaction.amount.toString();
-                  final cat = t.category.name.toLowerCase();
-                  return desc.contains(query) || amount.contains(query) || cat.contains(query);
-                }
-                return true;
-              }).toList();
-
-              // Sort by date descending
-              filteredTransactions.sort((a, b) => b.transaction.dateOfFinance.compareTo(a.transaction.dateOfFinance));
-
-              for (var t in filteredTransactions) {
-                if (t.transaction.isIncome) {
-                  totalIncome += t.transaction.amount;
-                } else {
-                  totalExpense += t.transaction.amount;
-                }
-              }
-              double balance = totalIncome - totalExpense;
-
-              return CustomScrollView(
-                slivers: [
-                  SliverAppBar.large(
-                    title: const Text('Financier'),
-                    centerTitle: false,
-                    actions: [
-                      IconButton(
-                        icon: const Icon(LucideIcons.barChart2),
-                        tooltip: 'Summary',
-                        onPressed: () => _showSummaryDialog(context, totalIncome, totalExpense, balance),
-                      ),
-                      IconButton(
-                         icon: const Icon(LucideIcons.settings),
-                         tooltip: 'Settings',
-                         onPressed: () => _showSettingsDialog(context),
-                      ),
-                      IconButton(
-                        icon: Icon(themeProvider.themeMode == ThemeMode.dark ? LucideIcons.sun : LucideIcons.moon),
-                        onPressed: () => themeProvider.toggleTheme(),
-                        tooltip: 'Toggle Theme',
-                      ),
-                      IconButton(
-                        icon: const Icon(LucideIcons.sheet),
-                        tooltip: 'Export to Excel',
-                        onPressed: () => _exportToExcel(context, transactionDao, categoryDao),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: Column(
-                        children: [
-                          // Date & Filter Row
-                          Row(
-                            children: [
-                              Expanded(
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(12),
-                                  onTap: () => _showMonthYearPicker(context),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.surface,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: theme.colorScheme.outlineVariant),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        const Icon(LucideIcons.calendar),
-                                        const SizedBox(width: 12),
-                                        Text(
-                                          DateFormat('MMMM yyyy').format(_selectedMonth),
-                                          style: theme.textTheme.titleMedium,
-                                        ),
-                                        const Spacer(),
-                                        const Icon(LucideIcons.chevronDown, size: 16),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              IconButton.filledTonal(
-                                onPressed: () => _showManageCategoriesDialog(context),
-                                icon: const Icon(LucideIcons.folderCog),
-                                tooltip: 'Manage Categories',
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          // Summary Card
-                          Container(
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  theme.colorScheme.primary,
-                                  theme.colorScheme.primaryContainer,
-                                ],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(24),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: theme.colorScheme.primary.withValues(alpha: 0.3),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 6),
-                                )
-                              ],
-                            ),
-                            child: Column(
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text('Page Net Total', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.8))),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          currencyFormat.format(balance),
-                                          style: theme.textTheme.headlineLarge?.copyWith(
-                                            color: theme.colorScheme.onPrimary,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    Icon(LucideIcons.wallet, size: 32, color: theme.colorScheme.onPrimary.withValues(alpha: 0.5)),
-                                  ],
-                                ),
-                                const SizedBox(height: 20),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _SummaryItem(
-                                        label: 'Income',
-                                        amount: totalIncome,
-                                        icon: LucideIcons.arrowUpCircle,
-                                        color: Colors.greenAccent.shade100, // Light for contrast on dark primary
-                                        currencyFormat: currencyFormat,
-                                      ),
-                                    ),
-                                    Container(
-                                        width: 1, height: 40,
-                                        color: theme.colorScheme.onPrimary.withValues(alpha: 0.2)
-                                    ),
-                                    Expanded(
-                                      child: _SummaryItem(
-                                        label: 'Expense',
-                                        amount: totalExpense,
-                                        icon: LucideIcons.arrowDownCircle,
-                                        color: Colors.redAccent.shade100,
-                                        currencyFormat: currencyFormat,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          // Search Bar
-                          TextField(
-                            controller: _searchController,
-                            decoration: const InputDecoration(
-                              hintText: 'Search transactions...',
-                              prefixIcon: Icon(LucideIcons.search),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.all(Radius.circular(12)),
-                                borderSide: BorderSide.none,
-                              ),
-                              filled: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (filteredTransactions.isEmpty)
-                    SliverFillRemaining(
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                             Icon(LucideIcons.ghost, size: 64, color: theme.colorScheme.outline),
-                             const SizedBox(height: 16),
-                             Text('No transactions found', style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.outline)),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                          final t = filteredTransactions[index];
-                           final isIncome = t.transaction.isIncome;
-
-                          return Dismissible(
-                            key: ValueKey(t.transaction.id),
-                            direction: DismissDirection.endToStart,
-                            background: Container(
-                              alignment: Alignment.centerRight,
-                              padding: const EdgeInsets.only(right: 20),
-                              color: theme.colorScheme.error,
-                              child: const Icon(LucideIcons.trash2, color: Colors.white),
-                            ),
-                            onDismissed: (direction) {
-                                final transactionDao = Provider.of<TransactionDao>(context, listen: false);
-                                _deleteWithUndo(context, transactionDao, t);
-                            },
-                            confirmDismiss: (direction) async {
-                              return await _showDeleteConfirmationDialog(context);
-                            },
-                            child: RepaintBoundary(
-                              child: Card(
-                              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                  side: BorderSide(color: theme.colorScheme.outlineVariant.withOpacity(0.4))
-                              ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(16),
-                                onTap: () => _showTransactionDialog(context, transactionToEdit: t),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: isIncome ? theme.colorScheme.primaryContainer : theme.colorScheme.errorContainer,
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        child: Icon(
-                                            isIncome ? LucideIcons.trendingUp : LucideIcons.trendingDown,
-                                            color: isIncome ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onErrorContainer
-                                        ),
-                                      ),
-                                      const SizedBox(width: 16),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              t.transaction.description,
-                                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                Badge(
-                                                  label: Text(t.category.name),
-                                                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                                                  textColor: theme.colorScheme.onSurfaceVariant,
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  DateFormat.MMMd().format(t.transaction.dateOfFinance),
-                                                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: Icon(LucideIcons.trash2, size: 20, color: theme.colorScheme.outline.withValues(alpha: 0.6)),
-                                        onPressed: () async {
-                                           final shouldDelete = await _showDeleteConfirmationDialog(context);
-                                           if (shouldDelete == true) {
-                                               if (context.mounted) {
-                                                 // Need to get DAO here or pass it available in scope
-                                                 // It's available as 'transactionDao' from build
-                                                 _deleteWithUndo(context, transactionDao, t);
-                                               }
-                                           }
-                                        },
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        '${isIncome ? "+" : "-"}${currencyFormat.format(t.transaction.amount)}',
-                                        style: theme.textTheme.titleMedium?.copyWith(
-                                          color: isIncome ? Colors.green : theme.colorScheme.error,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            ),
-                          );
-                        },
-                        childCount: filteredTransactions.length,
-                      ),
-                    ),
-                    const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
-                ],
-              );
+    
+    return Scaffold(
+      body: Row(
+        children: [
+          // 1. Navigation Rail (Collapsible-ish)
+          NavigationRail(
+            extended: false, // Could be toggleable
+            destinations: const [
+              NavigationRailDestination(
+                  icon: Icon(LucideIcons.home), 
+                  label: Text('Home')
+              ),
+              NavigationRailDestination(
+                  icon: Icon(LucideIcons.folderCog), 
+                  label: Text('Categories')
+              ),
+              NavigationRailDestination(
+                  icon: Icon(LucideIcons.settings), 
+                  label: Text('Settings')
+              ),
+            ],
+            selectedIndex: 0,
+            onDestinationSelected: (index) {
+               if (index == 1) _showManageCategoriesDialog(context);
+               if (index == 2) _showSettingsDialog(context);
             },
+            trailing: Padding(
+              padding: const EdgeInsets.only(top: 20),
+              child: IconButton(
+                icon: Icon(themeProvider.themeMode == ThemeMode.dark ? LucideIcons.sun : LucideIcons.moon),
+                onPressed: () => themeProvider.toggleTheme(),
+              ),
+            ),
           ),
-          bottomNavigationBar: Container(
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surface,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                )
+          const VerticalDivider(width: 1),
+
+          // 2. Master View (List)
+          Expanded(
+            flex: 4,
+            child: Column(
+              children: [
+                 // Top Bar in Master
+                 Padding(
+                   padding: const EdgeInsets.all(16.0),
+                   child: Column(
+                     children: [
+                       Row(
+                         children: [
+                           Expanded(child: _buildSearchBar()),
+                           const SizedBox(width: 16),
+                           _buildDateButton(context, theme),
+                         ],
+                       ),
+                       const SizedBox(height: 16),
+                       _buildCategoryTabs(context, categories, theme, isDesktop: true), 
+                     ],
+                   ),
+                 ),
+                 Expanded(
+                   child: CustomScrollView(
+                     slivers: [
+                       TransactionList(
+                         transactions: transactions,
+                         onTransactionTap: (t) {
+                           setState(() {
+                             _selectedTransaction = t;
+                             _showNewTransactionForm = false;
+                           });
+                         },
+                         onTransactionDelete: (t) => _deleteWithUndo(context, transactionDao, t),
+                         onTransactionDuplicate: (t) => _duplicateTransaction(context, transactionDao, t),
+                         compactMode: true,
+                       ),
+                     ],
+                   ),
+                 ),
+                 // Summary Footer in Master
+                 Container(
+                   decoration: BoxDecoration(
+                     border: Border(top: BorderSide(color: theme.dividerColor)),
+                     color: theme.colorScheme.surface,
+                   ),
+                   padding: const EdgeInsets.all(16),
+                     child: SummaryCard(totalIncome: income, totalExpense: expense, balance: balance),
+                 ),
               ],
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
+          ),
+          const VerticalDivider(width: 1),
+
+          // 3. Detail View (Form)
+          Expanded(
+            flex: 3,
+            child: Container(
+              color: theme.colorScheme.surfaceContainerLow,
+              padding: const EdgeInsets.all(24),
+              child: Column(
                 children: [
-                   _buildTabItem(context, 'All', LucideIcons.infinity, null, _selectedMainCategoryId == null),
-                   const SizedBox(width: 8),
-                   ...mainCategories.map((cat) {
-                      IconData icon;
-                      if (cat.name.contains('Income')) icon = LucideIcons.coins;
-                      else if (cat.name.contains('Essential')) icon = LucideIcons.shoppingCart;
-                      else if (cat.name.contains('Personal')) icon = LucideIcons.coffee;
-                      else if (cat.name.contains('Leisure')) icon = LucideIcons.gamepad2;
-                      else if (cat.name.contains('Finance')) icon = LucideIcons.briefcase;
-                      else if (cat.name.contains('Optional')) icon = LucideIcons.sparkles;
-                      else icon = LucideIcons.folder;
-                      
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 8.0),
-                        child: _buildTabItem(context, cat.name, icon, cat.id, _selectedMainCategoryId == cat.id),
-                      );
-                   }),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Details', style: theme.textTheme.headlineSmall),
+                      FilledButton.icon(
+                        onPressed: () {
+                           setState(() {
+                             _selectedTransaction = null;
+                             _showNewTransactionForm = true;
+                           });
+                        },
+                        icon: const Icon(LucideIcons.plus),
+                        label: const Text('New Transaction'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  Expanded(
+                    child: Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: (_showNewTransactionForm || _selectedTransaction == null) 
+                            ? TransactionForm(
+                                key: ValueKey(_showNewTransactionForm ? 'new' : 'null'), // Force rebuild
+                                transactionToEdit: null,
+                                onSaved: () {
+                                   setState(() {
+                                     _showNewTransactionForm = true; // Keep distinct state? 
+                                     // Actually clearer to reset:
+                                     _showNewTransactionForm = false;
+                                     _selectedTransaction = null;
+                                   });
+                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved!')));
+                                },
+                                onCancel: () {
+                                  setState(() { _showNewTransactionForm = false; });
+                                },
+                              )
+                            : TransactionForm(
+                                key: ValueKey(_selectedTransaction!.transaction.id),
+                                transactionToEdit: _selectedTransaction,
+                                onSaved: () {
+                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated!')));
+                                },
+                                onCancel: () {
+                                   setState(() {
+                                     _selectedTransaction = null; // Clear selection
+                                   });
+                                },
+                            ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
-        );
-      },
+        ],
+      ),
     );
+  }
+
+  // --- Helper Widgets ---
+
+  List<Widget> _buildAppBarActions(BuildContext context, ThemeProvider themeProvider, TransactionDao dao, CategoryDao catDao, double income, double expense, double balance) {
+    return [
+      IconButton(
+        icon: const Icon(LucideIcons.barChart2),
+        tooltip: 'Summary',
+        onPressed: () => _showSummaryDialog(context, income, expense, balance),
+      ),
+      IconButton(
+        icon: const Icon(LucideIcons.settings),
+        tooltip: 'Settings',
+        onPressed: () => _showSettingsDialog(context),
+      ),
+      IconButton(
+        icon: Icon(themeProvider.themeMode == ThemeMode.dark ? LucideIcons.sun : LucideIcons.moon),
+        onPressed: () => themeProvider.toggleTheme(),
+        tooltip: 'Toggle Theme',
+      ),
+      IconButton(
+        icon: const Icon(LucideIcons.sheet),
+        tooltip: 'Export to Excel',
+        onPressed: () => _exportToExcel(context, dao, catDao),
+      ),
+      const SizedBox(width: 8),
+    ];
+  }
+
+  Widget _buildDateFilterRow(BuildContext context, ThemeData theme) {
+     return Row(
+       children: [
+         Expanded(
+           child: InkWell(
+             onTap: () => _showMonthYearPicker(context),
+             child: _buildDateButton(context, theme),
+           ),
+         ),
+         const SizedBox(width: 12),
+         IconButton.filledTonal(
+           onPressed: () => _showManageCategoriesDialog(context),
+           icon: const Icon(LucideIcons.folderCog),
+           tooltip: 'Manage Categories',
+         ),
+       ],
+     );
+  }
+
+  Widget _buildDateButton(BuildContext context, ThemeData theme) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(LucideIcons.calendar),
+            const SizedBox(width: 12),
+            Text(
+              DateFormat('MMMM yyyy').format(_selectedMonth),
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(width: 12),
+            const Icon(LucideIcons.chevronDown, size: 16),
+          ],
+        ),
+      );
+  }
+
+  Widget _buildSearchBar() {
+    return TextField(
+      controller: _searchController,
+      decoration: const InputDecoration(
+        hintText: 'Search transactions...',
+        prefixIcon: Icon(LucideIcons.search),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(12)),
+          borderSide: BorderSide.none,
+        ),
+        filled: true,
+      ),
+    );
+  }
+
+  Widget _buildCategoryTabs(BuildContext context, List<Category> categories, ThemeData theme, {bool isDesktop = false}) {
+     Widget content = SingleChildScrollView(
+       scrollDirection: Axis.horizontal,
+       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+       child: Row(
+         children: [
+           _buildTabItem(context, 'All', LucideIcons.infinity, null, _selectedMainCategoryId == null),
+           const SizedBox(width: 8),
+           ...categories.map((cat) {
+            IconData icon;
+            if (cat.name.contains('Income')) icon = LucideIcons.coins;
+            else if (cat.name.contains('Essential')) icon = LucideIcons.shoppingCart;
+            else if (cat.name.contains('Personal')) icon = LucideIcons.coffee;
+            else if (cat.name.contains('Leisure')) icon = LucideIcons.gamepad2;
+            else if (cat.name.contains('Finance')) icon = LucideIcons.briefcase;
+            else if (cat.name.contains('Optional')) icon = LucideIcons.sparkles;
+            else icon = LucideIcons.folder;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: _buildTabItem(context, cat.name, icon, cat.id, _selectedMainCategoryId == cat.id),
+            );
+           }),
+         ],
+       ),
+     );
+     
+     if (isDesktop) return content;
+
+     return Container(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, -5),
+            )
+          ],
+        ),
+        child: content,
+     );
   }
 
   Widget _buildTabItem(BuildContext context, String label, IconData icon, int? id, bool isSelected) {
@@ -433,15 +522,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final color = isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant;
     final bg = isSelected ? theme.colorScheme.primaryContainer : Colors.transparent;
     
-    // Clean up label (remove emojis if present for cleaner look, optional)
-    // For now keeping simpler
-    String cleanLabel = label;
-    if (label.contains(' ')) {
-      // rough heuristic to keep it short if it has emojis
-      // split by space, if first part is emoji-like (check length?)
-      // actually lets just show it as is
-    }
-
     return InkWell(
       onTap: () {
         setState(() {
@@ -463,14 +543,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Icon(icon, size: 20, color: color),
             const SizedBox(height: 4),
             Text(
-              cleanLabel,
+              label,
               style: TextStyle(
                 color: color,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 fontSize: 10,
               ),
               maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              overflow: TextOverflow.ellipsis, // Clean label
             ),
           ],
         ),
@@ -478,7 +558,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- Helper Methods ---
+  // --- Logic Helpers ---
 
   Future<void> _showMonthYearPicker(BuildContext context) async {
     final now = DateTime.now();
@@ -491,7 +571,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       firstDate: firstDate,
       lastDate: lastDate,
       initialDatePickerMode: DatePickerMode.year,
-      helpText: 'Select Month (Day ignored)',
+      helpText: 'Select Month',
     );
 
     if (picked != null) {
@@ -530,40 +610,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Future<bool?> _showDeleteConfirmationDialog(BuildContext context) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete Transaction?'),
-          content: const Text('This action cannot be undone.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-               style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-               onPressed: () {
-                  if (context.mounted) Navigator.of(context).pop(true);
-               },
-               child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _exportToExcel(BuildContext context, TransactionDao dao,
-      CategoryDao categoryDao) async {
+  Future<void> _exportToExcel(BuildContext context, TransactionDao dao, CategoryDao categoryDao) async {
       try {
         final transactions = await dao.getAllTransactions();
         final excel = excel_file.Excel.createExcel();
         final sheetName = 'Transactions';
         final excel_file.Sheet sheet = excel[sheetName];
 
-        // Headers
         sheet.appendRow([
           excel_file.TextCellValue('ID'),
           excel_file.TextCellValue('Description'),
@@ -586,7 +639,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ]);
         }
         
-        // Remove default sheet if exists
         if(excel.sheets.containsKey('Sheet1')) {
            excel.delete('Sheet1');
         }
@@ -595,24 +647,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (fileBytes != null) {
           final fileName = 'financier_export_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx';
           
-          // Request path from user
-          String? outputFile = await FilePicker.platform.saveFile(
-            dialogTitle: 'Save Excel File',
-            fileName: fileName,
-            type: FileType.custom,
-            allowedExtensions: ['xlsx'],
+          // Use FileSelector for Desktop
+          final FileSaveLocation? result = await getSaveLocation(
+             suggestedName: fileName,
+             acceptedTypeGroups: [const XTypeGroup(label: 'Excel', extensions: ['xlsx'])],
           );
 
-          if (outputFile != null) {
-             final file = File(outputFile);
+          if (result != null) {
+             final file = File(result.path);
              await file.writeAsBytes(fileBytes);
 
              if (!context.mounted) return;
              ScaffoldMessenger.of(context).showSnackBar(
-               SnackBar(content: Text('Exported to $outputFile'), backgroundColor: Colors.green),
+               SnackBar(content: Text('Exported to ${result.path}'), backgroundColor: Colors.green),
              );
-          } else {
-            // User canceled
           }
         }
       } catch (e) {
@@ -622,6 +670,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
   }
+
   Future<void> _deleteWithUndo(BuildContext context, TransactionDao dao, TransactionWithCategoryAndParent t) async {
     await dao.deleteTransaction(t.transaction);
     if (context.mounted) {
@@ -647,46 +696,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
     }
   }
-
-}
-
-class _SummaryItem extends StatelessWidget {
-  final String label;
-  final double amount;
-  final IconData icon;
-  final Color color;
-  final NumberFormat currencyFormat;
-
-  const _SummaryItem({
-    required this.label,
-    required this.amount,
-    required this.icon,
-    required this.color,
-    required this.currencyFormat,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    var theme = Theme.of(context);
-    return Column(
-      children: [
-        Row(
-           mainAxisAlignment: MainAxisAlignment.center,
-           children: [
-             Icon(icon, color: color, size: 16),
-             const SizedBox(width: 4),
-             Text(label, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onPrimary.withValues(alpha: 0.8))),
-           ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          currencyFormat.format(amount), // Use the passed format
-          style: theme.textTheme.titleLarge?.copyWith(
-            color: theme.colorScheme.onPrimary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+  Future<void> _duplicateTransaction(BuildContext context, TransactionDao dao, TransactionWithCategoryAndParent original) async {
+    final newT = TransactionsCompanion.insert(
+      description: "${original.transaction.description} (Copy)",
+      amount: original.transaction.amount,
+      dateOfFinance: original.transaction.dateOfFinance,
+      categoryId: original.transaction.categoryId,
+      isIncome: Value(original.transaction.isIncome),
+      createdAt: Value(DateTime.now()),
     );
+    await dao.addTransaction(newT);
+    if(context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Transaction duplicated')));
+    }
   }
 }
