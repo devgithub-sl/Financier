@@ -21,6 +21,7 @@ import '../widgets/responsive_scaffold.dart';
 import '../widgets/transaction_list.dart';
 import '../widgets/transaction_form.dart';
 import '../widgets/summary_card.dart';
+import '../widgets/category_overflow_bar.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -280,7 +281,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                          ],
                        ),
                        const SizedBox(height: 16),
-                       _buildCategoryTabs(context, categories, theme, isDesktop: true), 
+                       // Category Tabs (Responsive with Overflow)
+                       if (categories.isNotEmpty)
+                        CategoryOverflowBar(
+                          categories: categories,
+                          selectedCategoryId: _selectedMainCategoryId,
+                          onCategorySelected: (id) {
+                            setState(() {
+                              _selectedMainCategoryId = id;
+                            });
+                          },
+                        ),
                      ],
                    ),
                  ),
@@ -329,12 +340,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       Text('Details', style: theme.textTheme.headlineSmall),
                       FilledButton.icon(
-                        onPressed: () {
-                           setState(() {
-                             _selectedTransaction = null;
-                             _showNewTransactionForm = true;
-                           });
-                        },
+                        // Open Dialog for New Transaction on Desktop
+                        onPressed: () => _showTransactionDialog(context),
                         icon: const Icon(LucideIcons.plus),
                         label: const Text('New Transaction'),
                       ),
@@ -347,24 +354,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       child: Padding(
                         padding: const EdgeInsets.all(24.0),
-                        child: (_showNewTransactionForm || _selectedTransaction == null) 
+                        child: _selectedTransaction != null
                             ? TransactionForm(
-                                key: ValueKey(_showNewTransactionForm ? 'new' : 'null'), // Force rebuild
-                                transactionToEdit: null,
-                                onSaved: () {
-                                   setState(() {
-                                     _showNewTransactionForm = true; // Keep distinct state? 
-                                     // Actually clearer to reset:
-                                     _showNewTransactionForm = false;
-                                     _selectedTransaction = null;
-                                   });
-                                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved!')));
-                                },
-                                onCancel: () {
-                                  setState(() { _showNewTransactionForm = false; });
-                                },
-                              )
-                            : TransactionForm(
                                 key: ValueKey(_selectedTransaction!.transaction.id),
                                 transactionToEdit: _selectedTransaction,
                                 onSaved: () {
@@ -375,7 +366,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                      _selectedTransaction = null; // Clear selection
                                    });
                                 },
-                            ),
+                            )
+                            : Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(LucideIcons.mousePointerClick, size: 64, color: theme.colorScheme.outlineVariant),
+                                    const SizedBox(height: 16),
+                                    Text('Select a transaction to view details', style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.outline)),
+                                  ],
+                                ),
+                              ),
                       ),
                     ),
                   ),
