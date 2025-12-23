@@ -13,6 +13,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SettingsService().init();
   database = AppDatabase();
+  await database.populateInitialCategories();
   runApp(const MyApp());
 }
 

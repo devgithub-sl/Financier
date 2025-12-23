@@ -28,29 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final TextEditingController _searchController = TextEditingController();
   DateTime _selectedMonth = DateTime.now();
   String _searchQuery = '';
-  int? _incomeCategoryId;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadIncomeCategory();
-    _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text;
-      });
-    });
-  }
-
-  Future<void> _loadIncomeCategory() async {
-    final categoryDao = Provider.of<CategoryDao>(context, listen: false);
-    final category = await categoryDao.getCategoryByName('Income');
-    if (category != null) {
-      if (!mounted) return;
-      setState(() {
-        _incomeCategoryId = category.id;
-      });
-    }
-  }
 
   @override
   void dispose() {
@@ -102,16 +80,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               filteredTransactions.sort((a, b) => b.transaction.dateOfFinance.compareTo(a.transaction.dateOfFinance));
 
               for (var t in filteredTransactions) {
-                // Determine if income or expense based on root category
-                bool isIncome = false;
-                if (_incomeCategoryId != null) {
-                   if (t.parentCategory != null) {
-                     if (t.parentCategory!.id == _incomeCategoryId) isIncome = true;
-                   } else {
-                     if (t.category.id == _incomeCategoryId) isIncome = true;
-                   }
-                }
-                if (isIncome) {
+                if (t.transaction.isIncome) {
                   totalIncome += t.transaction.amount;
                 } else {
                   totalExpense += t.transaction.amount;
@@ -300,14 +269,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       delegate: SliverChildBuilderDelegate(
                             (context, index) {
                           final t = filteredTransactions[index];
-                           bool isIncome = false;
-                           if (_incomeCategoryId != null) {
-                             if (t.parentCategory != null) {
-                               if (t.parentCategory!.id == _incomeCategoryId) isIncome = true;
-                             } else {
-                               if (t.category.id == _incomeCategoryId) isIncome = true;
-                             }
-                           }
+                           final isIncome = t.transaction.isIncome;
 
                           return Dismissible(
                             key: ValueKey(t.transaction.id),
@@ -318,8 +280,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               color: theme.colorScheme.error,
                               child: const Icon(LucideIcons.trash2, color: Colors.white),
                             ),
+                            onDismissed: (direction) {
+                                final transactionDao = Provider.of<TransactionDao>(context, listen: false);
+                                _deleteWithUndo(context, transactionDao, t);
+                            },
                             confirmDismiss: (direction) async {
-                              return await _showDeleteConfirmationDialog(context, t.transaction, transactionDao);
+                              return await _showDeleteConfirmationDialog(context);
                             },
                             child: RepaintBoundary(
                               child: Card(
@@ -327,7 +293,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               elevation: 0,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
-                                  side: BorderSide(color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4))
+                                  side: BorderSide(color: theme.colorScheme.outlineVariant.withOpacity(0.4))
                               ),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(16),
@@ -339,12 +305,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                       Container(
                                         padding: const EdgeInsets.all(10),
                                         decoration: BoxDecoration(
-                                          color: isIncome ? theme.colorScheme.tertiaryContainer : theme.colorScheme.secondaryContainer,
+                                          color: isIncome ? theme.colorScheme.primaryContainer : theme.colorScheme.errorContainer,
                                           borderRadius: BorderRadius.circular(12),
                                         ),
                                         child: Icon(
-                                            isIncome ? LucideIcons.trendingUp : LucideIcons.receipt,
-                                            color: isIncome ? theme.colorScheme.onTertiaryContainer : theme.colorScheme.onSecondaryContainer
+                                            isIncome ? LucideIcons.trendingUp : LucideIcons.trendingDown,
+                                            color: isIncome ? theme.colorScheme.onPrimaryContainer : theme.colorScheme.onErrorContainer
                                         ),
                                       ),
                                       const SizedBox(width: 16),
@@ -374,6 +340,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                           ],
                                         ),
                                       ),
+                                      IconButton(
+                                        icon: Icon(LucideIcons.trash2, size: 20, color: theme.colorScheme.outline.withValues(alpha: 0.6)),
+                                        onPressed: () async {
+                                           final shouldDelete = await _showDeleteConfirmationDialog(context);
+                                           if (shouldDelete == true) {
+                                               if (context.mounted) {
+                                                 // Need to get DAO here or pass it available in scope
+                                                 // It's available as 'transactionDao' from build
+                                                 _deleteWithUndo(context, transactionDao, t);
+                                               }
+                                           }
+                                        },
+                                      ),
+                                      const SizedBox(width: 8),
                                       Text(
                                         '${isIncome ? "+" : "-"}${currencyFormat.format(t.transaction.amount)}',
                                         style: theme.textTheme.titleMedium?.copyWith(
@@ -459,8 +439,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Future<bool?> _showDeleteConfirmationDialog(
-      BuildContext context, Transaction transaction, TransactionDao dao) {
+  Future<bool?> _showDeleteConfirmationDialog(BuildContext context) {
     return showDialog<bool>(
       context: context,
       builder: (context) {
@@ -474,8 +453,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             FilledButton(
                style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
-               onPressed: () async {
-                  await dao.deleteTransaction(transaction.id);
+               onPressed: () {
                   if (context.mounted) Navigator.of(context).pop(true);
                },
                child: const Text('Delete'),
@@ -553,6 +531,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
         );
       }
   }
+  Future<void> _deleteWithUndo(BuildContext context, TransactionDao dao, TransactionWithCategoryAndParent t) async {
+    await dao.deleteTransaction(t.transaction);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Transaction deleted'),
+          action: SnackBarAction(
+            label: 'UNDO',
+            onPressed: () async {
+              await dao.addTransaction(
+                  TransactionsCompanion.insert(
+                    description: t.transaction.description,
+                    amount: t.transaction.amount,
+                    dateOfFinance: t.transaction.dateOfFinance,
+                    categoryId: t.transaction.categoryId,
+                    isIncome: Value(t.transaction.isIncome),
+                    createdAt: Value(t.transaction.createdAt),
+                  )
+              );
+            },
+          ),
+        ),
+      );
+    }
+  }
+
 }
 
 class _SummaryItem extends StatelessWidget {

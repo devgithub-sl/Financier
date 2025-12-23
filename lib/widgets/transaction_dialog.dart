@@ -27,6 +27,8 @@ class _TransactionDialogState extends State<TransactionDialog> {
   int? _selectedCategoryId;
   bool _isEditMode = false;
 
+  bool _isIncome = false;
+
   @override
   void initState() {
     super.initState();
@@ -37,6 +39,7 @@ class _TransactionDialogState extends State<TransactionDialog> {
       _amountController.text = transaction.amount.toString();
       _selectedDate = transaction.dateOfFinance;
       _selectedCategoryId = transaction.categoryId;
+      _isIncome = transaction.isIncome;
     }
   }
 
@@ -52,6 +55,9 @@ class _TransactionDialogState extends State<TransactionDialog> {
     final categoryDao = Provider.of<CategoryDao>(context, listen: false);
     final transactionDao = Provider.of<TransactionDao>(context, listen: false);
     final theme = Theme.of(context);
+
+    // Filter categories based on selection?
+    // For now, let's keep it simple. But ideally we should filter.
 
     return AlertDialog(
       title: Row(
@@ -70,6 +76,45 @@ class _TransactionDialogState extends State<TransactionDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Income / Expense Toggle
+              SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment<bool>(
+                    value: false,
+                    label: Text('Expense'),
+                    icon: Icon(LucideIcons.arrowDownCircle),
+                  ),
+                  ButtonSegment<bool>(
+                    value: true,
+                    label: Text('Income'),
+                    icon: Icon(LucideIcons.arrowUpCircle),
+                  ),
+                ],
+                selected: {_isIncome},
+                onSelectionChanged: (Set<bool> newSelection) {
+                  setState(() {
+                    _isIncome = newSelection.first;
+                  });
+                },
+                style: ButtonStyle(
+                  backgroundColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.selected)) {
+                       return _isIncome 
+                          ? Colors.green.withValues(alpha: 0.2) 
+                          : theme.colorScheme.errorContainer;
+                    }
+                    return null;
+                  }),
+                  foregroundColor: WidgetStateProperty.resolveWith((states) {
+                     if (states.contains(WidgetState.selected)) {
+                        return _isIncome ? Colors.green : theme.colorScheme.error;
+                     }
+                     return null;
+                  }),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               TextFormField(
                 controller: _descController,
                 decoration: const InputDecoration(
@@ -105,9 +150,21 @@ class _TransactionDialogState extends State<TransactionDialog> {
                     return const LinearProgressIndicator();
                   }
                   final categoryGroups = snapshot.data ?? [];
+                  
+                  // Helper to identify Income categories
+                  final incomeIds = <int>{};
+                  for (final group in categoryGroups) {
+                    if (group.category.name == '💰 Income') {
+                      incomeIds.add(group.category.id);
+                      for (final sub in group.subcategories) {
+                        incomeIds.add(sub.id);
+                      }
+                    }
+                  }
 
                   final items = <DropdownMenuItem<int>>[];
                   for (final group in categoryGroups) {
+                    // Ideally check if group matches type, but not enforcing strictness yet as categories are loose
                     items.add(DropdownMenuItem<int>(
                       value: group.category.id,
                       child: Text(
@@ -144,6 +201,14 @@ class _TransactionDialogState extends State<TransactionDialog> {
                     onChanged: (value) {
                       setState(() {
                         _selectedCategoryId = value;
+                        // Auto-switch income/expense based on category
+                        if (value != null) {
+                           if (incomeIds.contains(value)) {
+                             _isIncome = true;
+                           } else {
+                             _isIncome = false;
+                           }
+                        }
                       });
                     },
                     validator: (value) =>
@@ -209,6 +274,7 @@ class _TransactionDialogState extends State<TransactionDialog> {
                   amount: Value(amount),
                   dateOfFinance: Value(_selectedDate),
                   categoryId: Value(_selectedCategoryId!),
+                  isIncome: Value(_isIncome),
                 );
                 await transactionDao.updateTransaction(updatedTransaction);
                 if (!mounted) return;
@@ -224,6 +290,7 @@ class _TransactionDialogState extends State<TransactionDialog> {
                   amount: Value(amount),
                   dateOfFinance: Value(_selectedDate),
                   categoryId: Value(_selectedCategoryId!),
+                  isIncome: Value(_isIncome),
                   createdAt: Value(DateTime.now()),
                 );
                 await transactionDao.addTransaction(newTransaction);

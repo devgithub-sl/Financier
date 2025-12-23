@@ -156,7 +156,7 @@ class _ManageCategoriesDialogState extends State<ManageCategoriesDialog> {
                                 icon: const Icon(LucideIcons.trash2, size: 18),
                                 color: theme.colorScheme.error,
                                 onPressed: () => _deleteCategory(
-                                    context, categoryDao, mainCat.category.id),
+                                    context, categoryDao, mainCat.category),
                               ),
                             ],
                           ),
@@ -170,7 +170,7 @@ class _ManageCategoriesDialogState extends State<ManageCategoriesDialog> {
                                 icon: const Icon(LucideIcons.trash2, size: 16),
                                 color: theme.colorScheme.error.withValues(alpha: 0.7),
                                 onPressed: () =>
-                                    _deleteCategory(context, categoryDao, sub.id),
+                                    _deleteCategory(context, categoryDao, sub),
                               ),
                             );
                           }).toList(),
@@ -223,9 +223,9 @@ class _ManageCategoriesDialogState extends State<ManageCategoriesDialog> {
   }
 
   void _deleteCategory(
-      BuildContext context, CategoryDao categoryDao, int id) async {
+      BuildContext context, CategoryDao categoryDao, Category category) async {
     try {
-      await categoryDao.deleteCategory(id);
+      await categoryDao.deleteCategory(category);
     } catch (e) {
        if (!mounted) return;
        ScaffoldMessenger.of(context).showSnackBar(

@@ -40,6 +40,7 @@ class Transactions extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get description => text().withLength(min: 1)();
   RealColumn get amount => real()();
+  BoolColumn get isIncome => boolean().withDefault(const Constant(false))();
   DateTimeColumn get dateOfFinance => dateTime()();
   DateTimeColumn get createdAt =>
       dateTime().withDefault(currentDateAndTime)();
@@ -69,85 +70,102 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration {
     return MigrationStrategy(
       onCreate: (m) async {
         await m.createAll();
-
-        // --- NEW: Create the V2 category structure ---
-        await batch((batch) async {
-          // --- 1. Create INCOME Categories ---
-          final incomeId = await into(categories).insert(
-              CategoriesCompanion.insert(name: '💰 Income'));
-          batch.insertAll(categories, [
-            CategoriesCompanion.insert(name: 'Salary / Allowance', parentId: Value(incomeId)),
-            CategoriesCompanion.insert(name: 'Freelance / Side Income', parentId: Value(incomeId)),
-            CategoriesCompanion.insert(name: 'Gifts / Refunds / Other', parentId: Value(incomeId)),
-          ]);
-
-          // --- 2. Create EXPENSE Categories ---
-          // Essential Living
-          final essentialId = await into(categories).insert(
-              CategoriesCompanion.insert(name: '🛒 Essential Living'));
-          batch.insertAll(categories, [
-            CategoriesCompanion.insert(name: 'Food & Groceries', parentId: Value(essentialId)),
-            CategoriesCompanion.insert(name: 'Rent / Housing', parentId: Value(essentialId)),
-            CategoriesCompanion.insert(name: 'Utilities (electricity, water, gas, internet, phone)', parentId: Value(essentialId)),
-            CategoriesCompanion.insert(name: 'Transportation (fuel, public transport, ride-sharing)', parentId: Value(essentialId)),
-            CategoriesCompanion.insert(name: 'Healthcare / Medicine', parentId: Value(essentialId)),
-            CategoriesCompanion.insert(name: 'Insurance (health, life, vehicle)', parentId: Value(essentialId)),
-          ]);
-
-          // Personal & Lifestyle
-          final personalId = await into(categories).insert(
-              CategoriesCompanion.insert(name: '☕ Personal & Lifestyle'));
-          batch.insertAll(categories, [
-            CategoriesCompanion.insert(name: 'Eating Out / Coffee', parentId: Value(personalId)),
-            CategoriesCompanion.insert(name: 'Clothing & Accessories', parentId: Value(personalId)),
-            CategoriesCompanion.insert(name: 'Books / Education', parentId: Value(personalId)),
-            CategoriesCompanion.insert(name: 'Subscriptions (Netflix, Spotify, etc.)', parentId: Value(personalId)),
-            CategoriesCompanion.insert(name: 'Personal Care (salon, skincare, gym)', parentId: Value(personalId)),
-          ]);
-
-          // Leisure & Entertainment
-          final leisureId = await into(categories).insert(
-              CategoriesCompanion.insert(name: '🎮 Leisure & Entertainment'));
-          batch.insertAll(categories, [
-            CategoriesCompanion.insert(name: 'Movies / Games / Events', parentId: Value(leisureId)),
-            CategoriesCompanion.insert(name: 'Travel / Vacations', parentId: Value(leisureId)),
-            CategoriesCompanion.insert(name: 'Hobbies (art supplies, instruments, etc.)', parentId: Value(leisureId)),
-            CategoriesCompanion.insert(name: 'Gifts / Donations', parentId: Value(leisureId)),
-          ]);
-
-          // Finance & Obligations
-          final financeId = await into(categories).insert(
-              CategoriesCompanion.insert(name: '💼 Finance & Obligations'));
-          batch.insertAll(categories, [
-            CategoriesCompanion.insert(name: 'Loan Payments / Debt', parentId: Value(financeId)),
-            CategoriesCompanion.insert(name: 'Savings & Investments', parentId: Value(financeId)),
-            CategoriesCompanion.insert(name: 'Taxes', parentId: Value(financeId)),
-            CategoriesCompanion.insert(name: 'Bank Fees / Charges', parentId: Value(financeId)),
-          ]);
-
-          // Optional
-          final optionalId = await into(categories).insert(
-              CategoriesCompanion.insert(name: 'Optional (for more insight)'));
-          batch.insertAll(categories, [
-            CategoriesCompanion.insert(name: 'Emergency / Unexpected (repairs, fines, medical emergencies)', parentId: Value(optionalId)),
-            CategoriesCompanion.insert(name: 'Pet Care', parentId: Value(optionalId)),
-            CategoriesCompanion.insert(name: 'Home Improvement / Maintenance', parentId: Value(optionalId)),
-          ]);
-        });
+        await populateInitialCategories();
       },
       onUpgrade: (m, from, to) async {
-        if (from == 1) {
-          await m.addColumn(categories, categories.parentId);
+        if (from < 2) {
+           try {
+             await m.addColumn(categories, categories.parentId);
+           } catch (e) {
+             // Ignore if column exists
+           }
+        }
+        if (from < 6) {
+          try {
+            await m.addColumn(transactions, transactions.isIncome);
+          } catch (e) {
+            // Ignore if column exists
+          }
         }
       },
     );
+  }
+
+  Future<void> populateInitialCategories() async {
+    // Check if categories are already populated
+    final count = await select(categories).get();
+    if (count.isNotEmpty) return;
+
+    await batch((batch) async {
+      // --- 1. Create INCOME Categories ---
+      final incomeId = await into(categories).insert(
+          CategoriesCompanion.insert(name: '💰 Income'));
+      batch.insertAll(categories, [
+        CategoriesCompanion.insert(name: 'Salary / Allowance', parentId: Value(incomeId)),
+        CategoriesCompanion.insert(name: 'Freelance / Side Income', parentId: Value(incomeId)),
+        CategoriesCompanion.insert(name: 'Gifts / Refunds / Other', parentId: Value(incomeId)),
+      ]);
+
+      // --- 2. Create EXPENSE Categories ---
+      // Essential Living
+      final essentialId = await into(categories).insert(
+          CategoriesCompanion.insert(name: '🛒 Essential Living'));
+      batch.insertAll(categories, [
+        CategoriesCompanion.insert(name: 'Food & Groceries', parentId: Value(essentialId)),
+        CategoriesCompanion.insert(name: 'Rent / Housing', parentId: Value(essentialId)),
+        CategoriesCompanion.insert(name: 'Utilities (electricity, water, gas, internet, phone)', parentId: Value(essentialId)),
+        CategoriesCompanion.insert(name: 'Transportation (fuel, public transport, ride-sharing)', parentId: Value(essentialId)),
+        CategoriesCompanion.insert(name: 'Healthcare / Medicine', parentId: Value(essentialId)),
+        CategoriesCompanion.insert(name: 'Insurance (health, life, vehicle)', parentId: Value(essentialId)),
+      ]);
+
+      // Personal & Lifestyle
+      final personalId = await into(categories).insert(
+          CategoriesCompanion.insert(name: '☕ Personal & Lifestyle'));
+      batch.insertAll(categories, [
+        CategoriesCompanion.insert(name: 'Eating Out / Coffee', parentId: Value(personalId)),
+        CategoriesCompanion.insert(name: 'Clothing & Accessories', parentId: Value(personalId)),
+        CategoriesCompanion.insert(name: 'Books / Education', parentId: Value(personalId)),
+        CategoriesCompanion.insert(name: 'Subscriptions (Netflix, Spotify, etc.)', parentId: Value(personalId)),
+        CategoriesCompanion.insert(name: 'Personal Care (salon, skincare, gym)', parentId: Value(personalId)),
+      ]);
+
+      // Leisure & Entertainment
+      final leisureId = await into(categories).insert(
+          CategoriesCompanion.insert(name: '🎮 Leisure & Entertainment'));
+      batch.insertAll(categories, [
+        CategoriesCompanion.insert(name: 'Movies / Games / Events', parentId: Value(leisureId)),
+        CategoriesCompanion.insert(name: 'Travel / Vacations', parentId: Value(leisureId)),
+        CategoriesCompanion.insert(name: 'Hobbies (art supplies, instruments, etc.)', parentId: Value(leisureId)),
+        CategoriesCompanion.insert(name: 'Gifts / Donations', parentId: Value(leisureId)),
+      ]);
+
+      // Finance & Obligations
+      final financeId = await into(categories).insert(
+          CategoriesCompanion.insert(name: '💼 Finance & Obligations'));
+      batch.insertAll(categories, [
+        CategoriesCompanion.insert(name: 'Loan Payments / Debt', parentId: Value(financeId)),
+        CategoriesCompanion.insert(name: 'Savings & Investments', parentId: Value(financeId)),
+        CategoriesCompanion.insert(name: 'Taxes', parentId: Value(financeId)),
+        CategoriesCompanion.insert(name: 'Bank Fees / Charges', parentId: Value(financeId)),
+      ]);
+
+      // Optional
+      final optionalId = await into(categories).insert(
+          CategoriesCompanion.insert(name: 'Optional (for more insight)'));
+      batch.insertAll(categories, [
+        CategoriesCompanion.insert(name: 'Emergency / Unexpected (repairs, fines, medical emergencies)', parentId: Value(optionalId)),
+        CategoriesCompanion.insert(name: 'Pet Care', parentId: Value(optionalId)),
+        CategoriesCompanion.insert(name: 'Home Improvement / Maintenance', parentId: Value(optionalId)),
+      ]);
+    });
   }
 }
 
@@ -202,8 +220,8 @@ class CategoryDao extends DatabaseAccessor<AppDatabase>
 
   Future<int> addCategory(CategoriesCompanion entry) =>
       into(categories).insert(entry);
-  Future<void> deleteCategory(int id) =>
-      (delete(categories)..where((c) => c.id.equals(id))).go();
+  Future<int> deleteCategory(Category category) =>
+      (delete(categories)..where((c) => c.id.equals(category.id))).go();
 
   Future<List<int>> getCategoryIdsForMain(Category mainCat) async {
     final allCategories = await getCategories();
@@ -212,6 +230,19 @@ class CategoryDao extends DatabaseAccessor<AppDatabase>
         .map((c) => c.id)
         .toList();
     return [mainCat.id, ...subCategoryIds];
+  }
+
+  Future<Set<int>> getIncomeCategoryIds() async {
+    final incomeCat = await getIncomeMainCategory();
+    final allCats = await getCategories();
+    
+    final ids = <int>{incomeCat.id};
+    for (final cat in allCats) {
+      if (cat.parentId == incomeCat.id) {
+        ids.add(cat.id);
+      }
+    }
+    return ids;
   }
 }
 
@@ -326,8 +357,8 @@ class TransactionDao extends DatabaseAccessor<AppDatabase>
     return _mapRowsToTransactions(rows);
   }
 
-  Future<void> deleteTransaction(int id) =>
-      (delete(transactions)..where((t) => t.id.equals(id))).go();
+  Future<int> deleteTransaction(Transaction transaction) =>
+      (delete(transactions)..where((t) => t.id.equals(transaction.id))).go();
 }
 
 // --- MODIFIED: Database file name changed ---

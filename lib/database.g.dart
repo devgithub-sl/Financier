@@ -300,6 +300,16 @@ class $TransactionsTable extends Transactions
   late final GeneratedColumn<double> amount = GeneratedColumn<double>(
       'amount', aliasedName, false,
       type: DriftSqlType.double, requiredDuringInsert: true);
+  static const VerificationMeta _isIncomeMeta =
+      const VerificationMeta('isIncome');
+  @override
+  late final GeneratedColumn<bool> isIncome = GeneratedColumn<bool>(
+      'is_income', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_income" IN (0, 1))'),
+      defaultValue: const Constant(false));
   static const VerificationMeta _dateOfFinanceMeta =
       const VerificationMeta('dateOfFinance');
   @override
@@ -336,6 +346,7 @@ class $TransactionsTable extends Transactions
         id,
         description,
         amount,
+        isIncome,
         dateOfFinance,
         createdAt,
         modifiedAt,
@@ -367,6 +378,10 @@ class $TransactionsTable extends Transactions
           amount.isAcceptableOrUnknown(data['amount']!, _amountMeta));
     } else if (isInserting) {
       context.missing(_amountMeta);
+    }
+    if (data.containsKey('is_income')) {
+      context.handle(_isIncomeMeta,
+          isIncome.isAcceptableOrUnknown(data['is_income']!, _isIncomeMeta));
     }
     if (data.containsKey('date_of_finance')) {
       context.handle(
@@ -409,6 +424,8 @@ class $TransactionsTable extends Transactions
           .read(DriftSqlType.string, data['${effectivePrefix}description'])!,
       amount: attachedDatabase.typeMapping
           .read(DriftSqlType.double, data['${effectivePrefix}amount'])!,
+      isIncome: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_income'])!,
       dateOfFinance: attachedDatabase.typeMapping.read(
           DriftSqlType.dateTime, data['${effectivePrefix}date_of_finance'])!,
       createdAt: attachedDatabase.typeMapping
@@ -430,6 +447,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
   final int id;
   final String description;
   final double amount;
+  final bool isIncome;
   final DateTime dateOfFinance;
   final DateTime createdAt;
   final DateTime modifiedAt;
@@ -438,6 +456,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       {required this.id,
       required this.description,
       required this.amount,
+      required this.isIncome,
       required this.dateOfFinance,
       required this.createdAt,
       required this.modifiedAt,
@@ -448,6 +467,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
     map['id'] = Variable<int>(id);
     map['description'] = Variable<String>(description);
     map['amount'] = Variable<double>(amount);
+    map['is_income'] = Variable<bool>(isIncome);
     map['date_of_finance'] = Variable<DateTime>(dateOfFinance);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['modified_at'] = Variable<DateTime>(modifiedAt);
@@ -460,6 +480,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       id: Value(id),
       description: Value(description),
       amount: Value(amount),
+      isIncome: Value(isIncome),
       dateOfFinance: Value(dateOfFinance),
       createdAt: Value(createdAt),
       modifiedAt: Value(modifiedAt),
@@ -474,6 +495,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       id: serializer.fromJson<int>(json['id']),
       description: serializer.fromJson<String>(json['description']),
       amount: serializer.fromJson<double>(json['amount']),
+      isIncome: serializer.fromJson<bool>(json['isIncome']),
       dateOfFinance: serializer.fromJson<DateTime>(json['dateOfFinance']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       modifiedAt: serializer.fromJson<DateTime>(json['modifiedAt']),
@@ -487,6 +509,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       'id': serializer.toJson<int>(id),
       'description': serializer.toJson<String>(description),
       'amount': serializer.toJson<double>(amount),
+      'isIncome': serializer.toJson<bool>(isIncome),
       'dateOfFinance': serializer.toJson<DateTime>(dateOfFinance),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'modifiedAt': serializer.toJson<DateTime>(modifiedAt),
@@ -498,6 +521,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           {int? id,
           String? description,
           double? amount,
+          bool? isIncome,
           DateTime? dateOfFinance,
           DateTime? createdAt,
           DateTime? modifiedAt,
@@ -506,6 +530,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
         id: id ?? this.id,
         description: description ?? this.description,
         amount: amount ?? this.amount,
+        isIncome: isIncome ?? this.isIncome,
         dateOfFinance: dateOfFinance ?? this.dateOfFinance,
         createdAt: createdAt ?? this.createdAt,
         modifiedAt: modifiedAt ?? this.modifiedAt,
@@ -517,6 +542,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
       description:
           data.description.present ? data.description.value : this.description,
       amount: data.amount.present ? data.amount.value : this.amount,
+      isIncome: data.isIncome.present ? data.isIncome.value : this.isIncome,
       dateOfFinance: data.dateOfFinance.present
           ? data.dateOfFinance.value
           : this.dateOfFinance,
@@ -534,6 +560,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           ..write('id: $id, ')
           ..write('description: $description, ')
           ..write('amount: $amount, ')
+          ..write('isIncome: $isIncome, ')
           ..write('dateOfFinance: $dateOfFinance, ')
           ..write('createdAt: $createdAt, ')
           ..write('modifiedAt: $modifiedAt, ')
@@ -543,8 +570,8 @@ class Transaction extends DataClass implements Insertable<Transaction> {
   }
 
   @override
-  int get hashCode => Object.hash(id, description, amount, dateOfFinance,
-      createdAt, modifiedAt, categoryId);
+  int get hashCode => Object.hash(id, description, amount, isIncome,
+      dateOfFinance, createdAt, modifiedAt, categoryId);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -552,6 +579,7 @@ class Transaction extends DataClass implements Insertable<Transaction> {
           other.id == this.id &&
           other.description == this.description &&
           other.amount == this.amount &&
+          other.isIncome == this.isIncome &&
           other.dateOfFinance == this.dateOfFinance &&
           other.createdAt == this.createdAt &&
           other.modifiedAt == this.modifiedAt &&
@@ -562,6 +590,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
   final Value<int> id;
   final Value<String> description;
   final Value<double> amount;
+  final Value<bool> isIncome;
   final Value<DateTime> dateOfFinance;
   final Value<DateTime> createdAt;
   final Value<DateTime> modifiedAt;
@@ -570,6 +599,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.id = const Value.absent(),
     this.description = const Value.absent(),
     this.amount = const Value.absent(),
+    this.isIncome = const Value.absent(),
     this.dateOfFinance = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.modifiedAt = const Value.absent(),
@@ -579,6 +609,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     this.id = const Value.absent(),
     required String description,
     required double amount,
+    this.isIncome = const Value.absent(),
     required DateTime dateOfFinance,
     this.createdAt = const Value.absent(),
     this.modifiedAt = const Value.absent(),
@@ -591,6 +622,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     Expression<int>? id,
     Expression<String>? description,
     Expression<double>? amount,
+    Expression<bool>? isIncome,
     Expression<DateTime>? dateOfFinance,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? modifiedAt,
@@ -600,6 +632,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       if (id != null) 'id': id,
       if (description != null) 'description': description,
       if (amount != null) 'amount': amount,
+      if (isIncome != null) 'is_income': isIncome,
       if (dateOfFinance != null) 'date_of_finance': dateOfFinance,
       if (createdAt != null) 'created_at': createdAt,
       if (modifiedAt != null) 'modified_at': modifiedAt,
@@ -611,6 +644,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       {Value<int>? id,
       Value<String>? description,
       Value<double>? amount,
+      Value<bool>? isIncome,
       Value<DateTime>? dateOfFinance,
       Value<DateTime>? createdAt,
       Value<DateTime>? modifiedAt,
@@ -619,6 +653,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
       id: id ?? this.id,
       description: description ?? this.description,
       amount: amount ?? this.amount,
+      isIncome: isIncome ?? this.isIncome,
       dateOfFinance: dateOfFinance ?? this.dateOfFinance,
       createdAt: createdAt ?? this.createdAt,
       modifiedAt: modifiedAt ?? this.modifiedAt,
@@ -637,6 +672,9 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
     }
     if (amount.present) {
       map['amount'] = Variable<double>(amount.value);
+    }
+    if (isIncome.present) {
+      map['is_income'] = Variable<bool>(isIncome.value);
     }
     if (dateOfFinance.present) {
       map['date_of_finance'] = Variable<DateTime>(dateOfFinance.value);
@@ -659,6 +697,7 @@ class TransactionsCompanion extends UpdateCompanion<Transaction> {
           ..write('id: $id, ')
           ..write('description: $description, ')
           ..write('amount: $amount, ')
+          ..write('isIncome: $isIncome, ')
           ..write('dateOfFinance: $dateOfFinance, ')
           ..write('createdAt: $createdAt, ')
           ..write('modifiedAt: $modifiedAt, ')
@@ -1025,6 +1064,7 @@ typedef $$TransactionsTableCreateCompanionBuilder = TransactionsCompanion
   Value<int> id,
   required String description,
   required double amount,
+  Value<bool> isIncome,
   required DateTime dateOfFinance,
   Value<DateTime> createdAt,
   Value<DateTime> modifiedAt,
@@ -1035,6 +1075,7 @@ typedef $$TransactionsTableUpdateCompanionBuilder = TransactionsCompanion
   Value<int> id,
   Value<String> description,
   Value<double> amount,
+  Value<bool> isIncome,
   Value<DateTime> dateOfFinance,
   Value<DateTime> createdAt,
   Value<DateTime> modifiedAt,
@@ -1078,6 +1119,9 @@ class $$TransactionsTableFilterComposer
 
   ColumnFilters<double> get amount => $composableBuilder(
       column: $table.amount, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isIncome => $composableBuilder(
+      column: $table.isIncome, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get dateOfFinance => $composableBuilder(
       column: $table.dateOfFinance, builder: (column) => ColumnFilters(column));
@@ -1127,6 +1171,9 @@ class $$TransactionsTableOrderingComposer
   ColumnOrderings<double> get amount => $composableBuilder(
       column: $table.amount, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<bool> get isIncome => $composableBuilder(
+      column: $table.isIncome, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<DateTime> get dateOfFinance => $composableBuilder(
       column: $table.dateOfFinance,
       builder: (column) => ColumnOrderings(column));
@@ -1175,6 +1222,9 @@ class $$TransactionsTableAnnotationComposer
 
   GeneratedColumn<double> get amount =>
       $composableBuilder(column: $table.amount, builder: (column) => column);
+
+  GeneratedColumn<bool> get isIncome =>
+      $composableBuilder(column: $table.isIncome, builder: (column) => column);
 
   GeneratedColumn<DateTime> get dateOfFinance => $composableBuilder(
       column: $table.dateOfFinance, builder: (column) => column);
@@ -1232,6 +1282,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             Value<int> id = const Value.absent(),
             Value<String> description = const Value.absent(),
             Value<double> amount = const Value.absent(),
+            Value<bool> isIncome = const Value.absent(),
             Value<DateTime> dateOfFinance = const Value.absent(),
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> modifiedAt = const Value.absent(),
@@ -1241,6 +1292,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             id: id,
             description: description,
             amount: amount,
+            isIncome: isIncome,
             dateOfFinance: dateOfFinance,
             createdAt: createdAt,
             modifiedAt: modifiedAt,
@@ -1250,6 +1302,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             Value<int> id = const Value.absent(),
             required String description,
             required double amount,
+            Value<bool> isIncome = const Value.absent(),
             required DateTime dateOfFinance,
             Value<DateTime> createdAt = const Value.absent(),
             Value<DateTime> modifiedAt = const Value.absent(),
@@ -1259,6 +1312,7 @@ class $$TransactionsTableTableManager extends RootTableManager<
             id: id,
             description: description,
             amount: amount,
+            isIncome: isIncome,
             dateOfFinance: dateOfFinance,
             createdAt: createdAt,
             modifiedAt: modifiedAt,
