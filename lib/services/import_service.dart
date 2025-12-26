@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:drift/drift.dart';
 import 'package:excel/excel.dart' as excel_file;
-import 'package:flutter/foundation.dart';
 import '../database.dart';
 
 class ImportStats {
@@ -173,17 +172,15 @@ class ImportService {
           // Since we might have just created the category as root, let's look at the Category DB object?
           // We already resolved categoryId.
           
-          if (incomeMain != null) {
-             // If existing cat, did we verify parent?
-             // Since we don't fetch full category object above, let's do a quick check or heuristic.
-             // If we created a new category, we made it root.
-             // Let's rely on name for now for robustness during import.
-             final lowerCat = categoryName.toLowerCase();
-             if (lowerCat.contains('income') || lowerCat.contains('salary') || lowerCat.contains('deposit')) {
-               isIncome = true;
-             }
-          }
-
+           // If existing cat, did we verify parent?
+           // Since we don't fetch full category object above, let's do a quick check or heuristic.
+           // If we created a new category, we made it root.
+           // Let's rely on name for now for robustness during import.
+           final lowerCat = categoryName.toLowerCase();
+           if (lowerCat.contains('income') || lowerCat.contains('salary') || lowerCat.contains('deposit')) {
+             isIncome = true;
+           }
+        
           if (isDuplicate) {
             stats.skipped++;
           } else {

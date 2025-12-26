@@ -10,7 +10,6 @@ import 'package:file_selector/file_selector.dart'; // Desktop file picker
 
 import '../database.dart';
 import '../theme/theme_provider.dart';
-import '../providers/currency_provider.dart';
 import '../widgets/transaction_dialog.dart';
 import '../widgets/manage_categories_dialog.dart';
 import '../widgets/settings_dialog.dart';
@@ -499,8 +498,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
            const SizedBox(width: 8),
            ...categories.map((cat) {
             IconData icon;
-            if (cat.name.contains('Income')) icon = LucideIcons.coins;
-            else if (cat.name.contains('Essential')) icon = LucideIcons.shoppingCart;
+            if (cat.name.contains('Income')) {
+              icon = LucideIcons.coins;
+            } else if (cat.name.contains('Essential')) icon = LucideIcons.shoppingCart;
             else if (cat.name.contains('Personal')) icon = LucideIcons.coffee;
             else if (cat.name.contains('Leisure')) icon = LucideIcons.gamepad2;
             else if (cat.name.contains('Finance')) icon = LucideIcons.briefcase;
